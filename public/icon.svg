@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="gem" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)" />
+  <rect x="24" y="24" width="464" height="464" rx="90" fill="none" stroke="#f59e0b" stroke-opacity="0.3" stroke-width="8" />
+  <path d="M256 100L130 175v162l126 75 126-75V175L256 100z" fill="url(#gem)" />
+  <path d="M256 100L130 175l126 50 126-50L256 100z" fill="#fbbf24" fill-opacity="0.6" />
+  <text x="256" y="325" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="110" font-weight="900" fill="#0f172a" text-anchor="middle" letter-spacing="-2">CP</text>
+</svg>

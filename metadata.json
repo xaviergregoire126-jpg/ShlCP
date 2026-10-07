@@ -1,0 +1,8 @@
+{
+  "name": "Moteur Cashpoint Madagascar - MVola & Airtel Money",
+  "description": "Moteur algorithmique et comptable pour Cashpoints à Madagascar : synchronisation des caisses, détection des frais cachés et parsing des SMS MVola et Airtel Money.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "Cashpoint Mada",
+  "short_name": "Cashpoint",
+  "start_url": "/CashPoint/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/10041/10041187.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/10041/10041187.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
