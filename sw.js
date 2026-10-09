@@ -3,9 +3,10 @@ const ASSETS = [
   './',
   './index.html',
   './manifest.json',
-  '/CashPoint/',
-  '/CashPoint/index.html',
-  '/CashPoint/manifest.json'
+  './icon.svg',
+  './icon-192.png',
+  './icon-512.png',
+  './apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (e) => {
@@ -25,7 +26,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
     caches.match(e.request).then((response) => {
-      return response || fetch(e.request).catch(() => caches.match('./') || caches.match('/CashPoint/'));
+      return response || fetch(e.request).catch(() => caches.match('./') || caches.match('./index.html'));
     })
   );
 });

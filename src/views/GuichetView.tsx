@@ -14,6 +14,7 @@ import { RealtimeSingleInput } from '../components/RealtimeSingleInput';
 import { BatchAuditInput } from '../components/BatchAuditInput';
 import { MvolaDiscrepancyBanner } from '../components/MvolaDiscrepancyBanner';
 import { AirtelDiscrepancyBanner } from '../components/AirtelDiscrepancyBanner';
+import { NetworkInversionModal } from '../components/NetworkInversionModal';
 
 interface GuichetViewProps {
   anchor: AnchorBalances;
@@ -30,11 +31,18 @@ interface GuichetViewProps {
   onOpenUnrecognizedModal: (rawText: string) => void;
   onResetSession: () => void;
   onNavigateToHistory: () => void;
+  onNavigateToSettings?: () => void;
   resetSignal: number;
   isMvolaBannerDismissed: boolean;
   onDismissMvolaBanner: () => void;
   isAirtelBannerDismissed: boolean;
   onDismissAirtelBanner: () => void;
+  onSaveNetworkProof?: (proof: {
+    reference?: string;
+    smsProof1: string;
+    smsProof2: string;
+    dateStr: string;
+  }) => void;
 }
 
 export const GuichetView: React.FC<GuichetViewProps> = ({
@@ -48,13 +56,21 @@ export const GuichetView: React.FC<GuichetViewProps> = ({
   onOpenUnrecognizedModal,
   onResetSession,
   onNavigateToHistory,
+  onNavigateToSettings,
   resetSignal,
   isMvolaBannerDismissed,
   onDismissMvolaBanner,
   isAirtelBannerDismissed,
   onDismissAirtelBanner,
+  onSaveNetworkProof,
 }) => {
   const [activeTab, setActiveTab] = useState<'realtime' | 'batch'>('realtime');
+  const [inversionModal, setInversionModal] = useState<{
+    isOpen: boolean;
+    reference?: string;
+  }>({
+    isOpen: false,
+  });
 
   const mvolaTxCount = transactions.filter((t) => t.operator === 'MVOLA').length;
   // 3. SÉCURITÉ ALERTE ÉCART MVOLA : Ne s'enclenche qu'à partir du DEUXIÈME SMS de la chaîne
@@ -70,21 +86,60 @@ export const GuichetView: React.FC<GuichetViewProps> = ({
       ? transactions.filter((t) => t.operator === 'AIRTEL' && t.balanceMismatch)
       : [];
 
+  const handleValidateProof = (proof: {
+    reference?: string;
+    smsProof1: string;
+    smsProof2: string;
+  }) => {
+    // Association de la preuve à la date de la transaction en écart
+    const targetMismatch =
+      mvolaMismatches.find((t) => t.reference === proof.reference) ||
+      mvolaMismatches[0];
+    const dateStr =
+      targetMismatch?.dateStr ||
+      transactions[transactions.length - 1]?.dateStr ||
+      new Date().toLocaleDateString('fr-FR');
+
+    if (onSaveNetworkProof) {
+      onSaveNetworkProof({
+        ...proof,
+        dateStr,
+      });
+    }
+
+    // Éteint définitivement l'alerte d'écart orange du Guichet
+    onDismissMvolaBanner();
+    setInversionModal({ isOpen: false });
+  };
+
   return (
     <div className="space-y-3 animate-in fade-in duration-200">
-      {/* 1. BANDEAU DES SOLDES (POINT ZÉRO) COMPACT */}
-      <ZeroPointAnchor
-        anchor={anchor}
-        onUpdateAnchor={onUpdateAnchor}
-        onResetSession={onResetSession}
-        transactionCount={transactions.length}
-      />
+      {/* 1. BOUTON DISCRET "Editer point zéro" TOUT EN HAUT */}
+      <div className="flex items-center justify-between pb-0.5">
+        <span className="text-[11px] font-mono font-medium text-slate-500">
+          Guichet Opérationnel
+        </span>
+        {onNavigateToSettings && (
+          <button
+            type="button"
+            onClick={onNavigateToSettings}
+            className="px-2.5 py-1 text-[11px] font-mono text-slate-400 hover:text-amber-300 bg-slate-900/60 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/30 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+            title="Modifier les soldes de départ du Point Zéro dans les Réglages"
+          >
+            <span>Editer point zéro</span>
+            <span className="text-amber-400 font-bold">→</span>
+          </button>
+        )}
+      </div>
 
       {/* ALERTE ÉCART MVOLA (COMPACTE - STRICTEMENT À PARTIR DU 2ÈME MESSAGE) */}
       {mvolaMismatches.length > 0 && !isMvolaBannerDismissed && (
         <MvolaDiscrepancyBanner
           mismatchedTransactions={mvolaMismatches}
           onDismiss={onDismissMvolaBanner}
+          onVerifyNetworkInversion={(ref) =>
+            setInversionModal({ isOpen: true, reference: ref })
+          }
         />
       )}
 
@@ -133,6 +188,7 @@ export const GuichetView: React.FC<GuichetViewProps> = ({
         <div className="p-3">
           {activeTab === 'realtime' ? (
             <RealtimeSingleInput
+              transactions={transactions}
               resetSignal={resetSignal}
               onValidateSms={onValidateSingleSms}
               onOpenUnrecognizedModal={onOpenUnrecognizedModal}
@@ -190,14 +246,13 @@ export const GuichetView: React.FC<GuichetViewProps> = ({
             <table className="w-full text-left text-xs font-mono">
               <thead className="bg-slate-950/60 text-slate-400 uppercase text-[9px] tracking-wider border-b border-slate-850">
                 <tr>
-                  <th className="py-1.5 px-2.5">Ordre (Réf / Heure)</th>
+                  <th className="py-1.5 px-2.5">Référence</th>
                   <th className="py-1.5 px-2.5">Opérateur</th>
                   <th className="py-1.5 px-2.5">Type</th>
                   <th className="py-1.5 px-2.5">Numéro</th>
                   <th className="py-1.5 px-2.5 text-right">Montant</th>
                   <th className="py-1.5 px-2.5 text-right">Com.</th>
                   <th className="py-1.5 px-2.5 text-right">Solde Après</th>
-                  <th className="py-1.5 px-2.5">Détail</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-850/60 text-[11px]">
@@ -229,7 +284,7 @@ export const GuichetView: React.FC<GuichetViewProps> = ({
                             {isHiddenFeeTransfer && !isMismatch && (
                               <span title={`⚠️ Frais cachés détectés: ${tx.frais.toLocaleString('fr-FR')} Ar`}>⚠️</span>
                             )}
-                            <span>{tx.heure}</span>
+                            <span>{tx.reference} ({tx.heure})</span>
                           </span>
                         )}
                       </td>
@@ -275,9 +330,6 @@ export const GuichetView: React.FC<GuichetViewProps> = ({
                           </div>
                         )}
                       </td>
-                      <td className="py-1.5 px-2.5 text-slate-500 text-[10px]">
-                        {tx.operator === 'MVOLA' ? (tx.heure !== '-' ? tx.heure : '-') : tx.reference}
-                      </td>
                     </tr>
                   );
                 })}
@@ -286,6 +338,14 @@ export const GuichetView: React.FC<GuichetViewProps> = ({
           </div>
         )}
       </section>
+
+      {/* MODALE D'AUDIT & JUSTIFICATION ANTI-FRAUDE */}
+      <NetworkInversionModal
+        isOpen={inversionModal.isOpen}
+        reference={inversionModal.reference}
+        onClose={() => setInversionModal({ isOpen: false })}
+        onValidate={handleValidateProof}
+      />
     </div>
   );
 };

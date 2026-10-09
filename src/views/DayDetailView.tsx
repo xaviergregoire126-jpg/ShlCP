@@ -13,11 +13,13 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
-import { Transaction } from '../types';
+import { Transaction, NetworkInversionProof } from '../types';
+import { OfficialArchiveReceiptModal } from '../components/OfficialArchiveReceiptModal';
 
 interface DayDetailViewProps {
   dateStr: string;
   transactions: Transaction[];
+  networkProofs?: NetworkInversionProof[];
   onBack: () => void;
   onDeleteTransaction: (id: string) => void;
 }
@@ -25,11 +27,44 @@ interface DayDetailViewProps {
 export const DayDetailView: React.FC<DayDetailViewProps> = ({
   dateStr,
   transactions,
+  networkProofs = [],
   onBack,
   onDeleteTransaction,
 }) => {
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [copiedRaw, setCopiedRaw] = useState(false);
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
+
+  // Filtres interactifs pour audit des transactions (Micro-UI)
+  const [operatorFilter, setOperatorFilter] = useState<'ALL' | 'MVOLA' | 'AIRTEL'>('ALL');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'DEPOT' | 'RETRAIT' | 'TRANSFERT' | 'ECHANGE'>('ALL');
+
+  // Filtrage combiné en temps réel
+  const filteredTransactions = transactions.filter((t) => {
+    // 1. Filtre Opérateur
+    if (operatorFilter === 'MVOLA' && t.operator !== 'MVOLA') return false;
+    if (operatorFilter === 'AIRTEL' && t.operator !== 'AIRTEL') return false;
+
+    // 2. Filtre Type de Transaction
+    if (typeFilter === 'DEPOT') {
+      const isDepot = t.type === 'DEPOT' || t.typeOperation?.toLowerCase() === 'dépôt' || t.typeOperation?.toLowerCase() === 'depot';
+      if (!isDepot) return false;
+    }
+    if (typeFilter === 'RETRAIT') {
+      const isRetrait = t.type === 'RETRAIT' || t.typeOperation?.toLowerCase() === 'retrait';
+      if (!isRetrait) return false;
+    }
+    if (typeFilter === 'TRANSFERT') {
+      const isTransfert = t.type === 'TRANSFERT' || t.typeOperation?.toLowerCase() === 'transfert';
+      if (!isTransfert) return false;
+    }
+    if (typeFilter === 'ECHANGE') {
+      const isEchange = t.type === 'ECHANGE' || t.typeOperation?.toLowerCase() === 'echange' || t.typeOperation?.toLowerCase() === 'échange';
+      if (!isEchange) return false;
+    }
+
+    return true;
+  });
 
   // Synthèse
   const totalOperations = transactions.length;
@@ -65,7 +100,7 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
   const handleExportExcel = () => {
     const headers = [
       'Date',
-      'Heure',
+      'Référence',
       'Opérateur',
       'Type',
       'Numéro',
@@ -73,12 +108,11 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
       'Commission',
       'Frais',
       'Solde Après',
-      'Référence',
     ];
 
     const rows = transactions.map((t) => [
       `"${dateStr}"`,
-      `"${t.heure}"`,
+      `"${t.reference}"`,
       `"${t.operateur}"`,
       `"${t.typeOperation}"`,
       `"${t.numero}"`,
@@ -86,7 +120,6 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
       t.commission,
       t.frais,
       t.soldeApres,
-      `"${t.reference}"`,
     ]);
 
     const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
@@ -101,7 +134,7 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
   };
 
   const handleExportPdf = () => {
-    window.print();
+    setIsArchiveModalOpen(true);
   };
 
   const handleCopyRaw = (text: string) => {
@@ -260,14 +293,85 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
         </div>
       </div>
 
+      {/* 1. BARRE DE FILTRES HORIZONTALE TRÈS COMPACTE (MICRO-UI) */}
+      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+          {/* Filtre Opérateur */}
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-slate-400 font-mono font-bold mr-0.5">Réseau :</span>
+            {(
+              [
+                { id: 'ALL', label: 'Tous' },
+                { id: 'MVOLA', label: 'MVola' },
+                { id: 'AIRTEL', label: 'Airtel' },
+              ] as const
+            ).map((op) => {
+              const isActive = operatorFilter === op.id;
+              return (
+                <button
+                  key={op.id}
+                  type="button"
+                  onClick={() => setOperatorFilter(op.id)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer select-none ${
+                    isActive
+                      ? 'bg-slate-700 text-white border border-slate-500 shadow-xs'
+                      : 'bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:bg-slate-850 border border-slate-850'
+                  }`}
+                >
+                  {op.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Filtre Type de Transaction */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-[10px] text-slate-400 font-mono font-bold mr-0.5">Type :</span>
+            {(
+              [
+                { id: 'ALL', label: 'Tous' },
+                { id: 'DEPOT', label: 'Dépôt' },
+                { id: 'RETRAIT', label: 'Retrait' },
+                { id: 'TRANSFERT', label: 'Transfert' },
+                { id: 'ECHANGE', label: 'Échange' },
+              ] as const
+            ).map((type) => {
+              const isActive = typeFilter === type.id;
+              return (
+                <button
+                  key={type.id}
+                  type="button"
+                  onClick={() => setTypeFilter(type.id)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer select-none ${
+                    isActive
+                      ? 'bg-slate-700 text-white border border-slate-500 shadow-xs'
+                      : 'bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:bg-slate-850 border border-slate-850'
+                  }`}
+                >
+                  {type.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
       {/* B) CARTES DE TRANSACTIONS (P-2 À PY-2 PX-3, ROUNDED-LG, MB-1.5) */}
       <div className="space-y-1.5 pt-1">
         <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
-          <span>Transactions ({transactions.length})</span>
+          <span>
+            Transactions ({filteredTransactions.length}
+            {filteredTransactions.length !== transactions.length ? ` sur ${transactions.length}` : ''})
+          </span>
           <span className="text-slate-500 font-normal">Cliquer pour inspecter</span>
         </div>
 
-        {transactions.map((tx) => {
+        {filteredTransactions.length === 0 ? (
+          <div className="p-4 rounded-lg bg-slate-900/60 border border-slate-850 text-center text-slate-500 text-xs font-mono py-6">
+            Aucune transaction ne correspond aux critères sélectionnés.
+          </div>
+        ) : (
+          [...filteredTransactions].reverse().map((tx) => {
           const dir = getOperationDirection(tx.typeOperation);
 
           return (
@@ -276,7 +380,7 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
               onClick={() => setSelectedTx(tx)}
               className="bg-slate-900/90 rounded-lg py-2 px-3 mb-1.5 border border-slate-850 hover:border-slate-700 transition-colors cursor-pointer flex items-center justify-between gap-3 group select-none"
             >
-              {/* Alignement Gauche : Logo opérateur, type avec icône, Heure & Numéro */}
+              {/* Alignement Gauche : Logo opérateur, type avec icône, Référence & Numéro */}
               <div className="flex items-center gap-2.5">
                 <div
                   className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-[10px] shrink-0 ${
@@ -299,9 +403,9 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
 
                   <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5">
                     {tx.operator === 'MVOLA' ? (
-                      <span className="text-amber-400 font-medium">Ref: {tx.reference}</span>
+                      <span className="text-amber-400 font-bold font-mono">Ref: {tx.reference}</span>
                     ) : (
-                      <span className="text-slate-300 font-medium">{tx.heure}</span>
+                      <span className="text-slate-300 font-medium">{tx.reference} ({tx.heure})</span>
                     )}
                     <span className="text-slate-600">·</span>
                     <span className="text-slate-400">{tx.numero || '-'}</span>
@@ -326,8 +430,63 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
               </div>
             </div>
           );
-        })}
+        }))}
       </div>
+
+      {/* SECTION B : JUSTIFICATIONS ET CORRECTIONS RÉSEAU (ANTI-FRAUDE) */}
+      {networkProofs && networkProofs.length > 0 && (
+        <section className="bg-slate-900/90 border border-slate-800 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+            <h3 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+              <span>🛡️</span>
+              <span>B) JUSTIFICATIONS ET CORRECTIONS RÉSEAU (ANTI-FRAUDE)</span>
+            </h3>
+            <span className="text-[10px] font-mono text-slate-400">
+              {networkProofs.length} preuve(s) archivée(s)
+            </span>
+          </div>
+          <div className="space-y-2">
+            {networkProofs.map((p, idx) => (
+              <div
+                key={p.id || idx}
+                className="p-2.5 rounded bg-slate-950/80 border border-slate-800 text-[11px] font-mono space-y-1.5"
+              >
+                <div className="flex items-center justify-between text-slate-300 text-[10px]">
+                  <span className="font-bold text-amber-400">
+                    Inversion justifiée {p.reference ? `(Réf: ${p.reference})` : ''}
+                  </span>
+                  <span className="text-slate-500">
+                    {new Date(p.timestamp).toLocaleTimeString('fr-FR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300 whitespace-pre-wrap break-words">
+                    <span className="text-slate-400 font-bold block mb-0.5">Preuve N°1 :</span>
+                    {p.smsProof1 || '-'}
+                  </div>
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300 whitespace-pre-wrap break-words">
+                    <span className="text-slate-400 font-bold block mb-0.5">Preuve N°2 :</span>
+                    {p.smsProof2 || '-'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* REÇU D'ARCHIVAGE JOURNALIER OFFICIEL (IMPRESSION PDF) */}
+      {isArchiveModalOpen && (
+        <OfficialArchiveReceiptModal
+          dateStr={dateStr}
+          transactions={transactions}
+          proofs={networkProofs}
+          onClose={() => setIsArchiveModalOpen(false)}
+        />
+      )}
 
       {/* C) MODAL DE DRILL-DOWN COMPACT (FENÊTRE FLOTTANTE) */}
       {selectedTx && (
@@ -349,7 +508,7 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({
                     Détail Transaction
                   </h3>
                   <div className="text-[10px] text-slate-400 font-mono">
-                    {selectedTx.heure} · {selectedTx.typeOperation.toUpperCase()}
+                    {selectedTx.operator === 'MVOLA' ? `Ref: ${selectedTx.reference}` : `${selectedTx.reference} (${selectedTx.heure})`} · {selectedTx.typeOperation.toUpperCase()}
                   </div>
                 </div>
               </div>

@@ -97,3 +97,13 @@ export interface BatchAuditSummary {
   hiddenFeesTotal: number;
   commissionsTotal: number;
 }
+
+export interface NetworkInversionProof {
+  id: string;
+  dateStr: string;
+  timestamp: number;
+  reference?: string;
+  smsProof1: string;
+  smsProof2: string;
+  operator?: Operator;
+}

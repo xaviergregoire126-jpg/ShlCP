@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Moteur Cashpoint Madagascar - MVola & Airtel Money</title>
+    <meta name="description" content="Moteur algorithmique et comptable pour Cashpoints à Madagascar : synchronisation des caisses, détection des frais cachés et parsing des SMS MVola et Airtel Money." />
+    <meta property="og:title" content="Moteur Cashpoint Madagascar - MVola & Airtel Money" />
+    <meta property="og:description" content="Moteur algorithmique et comptable pour Cashpoints à Madagascar : synchronisation des caisses, détection des frais cachés et parsing des SMS MVola et Airtel Money." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Cashpoint" />
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/10041/10041187.png" />
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/10041/10041187.png" />
+    <!-- Manifeste PWA officiel -->
+    <link rel="manifest" href="manifest.json" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js')
+          .then(() => console.log('Service Worker Enregistré'))
+          .catch(err => console.error('Erreur SW:', err));
+      }
+    </script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-amber-500 selection:text-slate-950 min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

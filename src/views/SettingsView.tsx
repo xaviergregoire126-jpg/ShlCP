@@ -5,6 +5,8 @@ import {
   Save,
   FileCheck,
 } from 'lucide-react';
+import { ZeroPointAnchor } from '../components/ZeroPointAnchor';
+import { AnchorBalances } from '../types';
 
 export interface OperatorTariffConfig {
   mvola: {
@@ -42,7 +44,19 @@ export const DEFAULT_TARIFF_CONFIG: OperatorTariffConfig = {
 
 const LOCAL_STORAGE_SETTINGS_KEY = 'cashpoint_tariff_config_v1';
 
-export const SettingsView: React.FC = () => {
+interface SettingsViewProps {
+  anchor?: AnchorBalances;
+  onUpdateAnchor?: (updated: AnchorBalances) => void;
+  onResetSession?: () => void;
+  transactionCount?: number;
+}
+
+export const SettingsView: React.FC<SettingsViewProps> = ({
+  anchor,
+  onUpdateAnchor,
+  onResetSession,
+  transactionCount = 0,
+}) => {
   const [config, setConfig] = useState<OperatorTariffConfig>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
@@ -122,6 +136,18 @@ export const SettingsView: React.FC = () => {
           <FileCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           <span>Paramètres mis à jour avec succès dans le navigateur.</span>
         </div>
+      )}
+
+      {/* SECTION POINT ZÉRO : DÉPLACÉE DEPUIS GUICHET */}
+      {anchor && onUpdateAnchor && onResetSession && (
+        <section className="space-y-1.5">
+          <ZeroPointAnchor
+            anchor={anchor}
+            onUpdateAnchor={onUpdateAnchor}
+            onResetSession={onResetSession}
+            transactionCount={transactionCount}
+          />
+        </section>
       )}
 
       {/* FORMULAIRE DES RÉGLAGES COMPACT */}

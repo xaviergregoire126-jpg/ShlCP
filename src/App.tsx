@@ -5,7 +5,13 @@ import {
   RotateCcw,
   Zap,
 } from 'lucide-react';
-import { AnchorBalances, ExtractedFileSmsItem, RawParsedSms, Transaction } from './types';
+import {
+  AnchorBalances,
+  ExtractedFileSmsItem,
+  RawParsedSms,
+  Transaction,
+  NetworkInversionProof,
+} from './types';
 import { parseSingleSms } from './engine/parser';
 import {
   recalculateAllTransactions,
@@ -21,10 +27,13 @@ import { HistoryView } from './views/HistoryView';
 import { SettingsView } from './views/SettingsView';
 import { UnrecognizedModal } from './components/UnrecognizedModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfficialArchiveReceiptModal } from './components/OfficialArchiveReceiptModal';
 
 const LOCAL_STORAGE_ANCHOR_KEY = 'cashpoint_anchor_v3';
 const LOCAL_STORAGE_TRANSACTIONS_KEY = 'cashpoint_transactions_v3';
 const LOCAL_STORAGE_ACTIVE_WINDOW_KEY = 'cashpoint_active_window_v3';
+const LOCAL_STORAGE_PROOFS_KEY = 'cashpoint_network_proofs_v3';
+const LOCAL_STORAGE_ARCHIVED_TXS_KEY = 'cashpoint_archived_txs_v3';
 
 // 3. Valeurs par défaut du Point Zéro (100% vierge au premier lancement : 0 Ar)
 const DEFAULT_ANCHOR: AnchorBalances = {
@@ -35,20 +44,10 @@ const DEFAULT_ANCHOR: AnchorBalances = {
 };
 
 export default function App() {
-  // 1. Navigation Multi-Fenêtres (Bottom Navigation Bar)
-  const [activeWindow, setActiveWindow] = useState<ActiveNavWindow>(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_ACTIVE_WINDOW_KEY);
-      if (saved && ['dash', 'guichet', 'history', 'settings'].includes(saved)) {
-        return saved as ActiveNavWindow;
-      }
-    } catch {
-      // ignore
-    }
-    return 'guichet'; // Guichet par défaut pour les opérations directes
-  });
+  // 1. Navigation par onglets locale stricte (Démarrage immédiat sur 'dash' sans vérification externe)
+  const [activeWindow, setActiveWindow] = useState<ActiveNavWindow>('dash');
 
-  // Sauvegarde fenêtre active
+  // Sauvegarde fenêtre active pour persistance locale optionnelle
   useEffect(() => {
     try {
       localStorage.setItem(LOCAL_STORAGE_ACTIVE_WINDOW_KEY, activeWindow);
@@ -61,7 +60,17 @@ export default function App() {
   const [anchor, setAnchor] = useState<AnchorBalances>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_ANCHOR_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            cash: Number(parsed.cash) || 0,
+            mvola: Number(parsed.mvola) || 0,
+            airtel: Number(parsed.airtel) || 0,
+            isLocked: Boolean(parsed.isLocked),
+          };
+        }
+      }
     } catch {
       // ignore
     }
@@ -72,7 +81,10 @@ export default function App() {
   const [rawTransactions, setRawTransactions] = useState<RawParsedSms[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_TRANSACTIONS_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
     } catch {
       // ignore
     }
@@ -96,6 +108,62 @@ export default function App() {
     }
   }, [rawTransactions]);
 
+  // Preuves d'inversion réseau (Module Anti-Fraude)
+  const [networkProofs, setNetworkProofs] = useState<NetworkInversionProof[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_PROOFS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_PROOFS_KEY, JSON.stringify(networkProofs));
+    } catch {
+      // Fallback
+    }
+  }, [networkProofs]);
+
+  // Transactions archivées et scellées lors des clôtures de journées
+  const [archivedTransactions, setArchivedTransactions] = useState<Transaction[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_ARCHIVED_TXS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_ARCHIVED_TXS_KEY, JSON.stringify(archivedTransactions));
+    } catch {
+      // Fallback
+    }
+  }, [archivedTransactions]);
+
+  // État de la clôture de la journée active (bien initialisé par défaut à 'ouvert' / false)
+  const [isDayClosed, setIsDayClosed] = useState<boolean>(false);
+
+  // Modale de reçu d'archivage généré suite à la clôture de journée
+  const [closureReceiptModal, setClosureReceiptModal] = useState<{
+    isOpen: boolean;
+    dateStr: string;
+    transactions: Transaction[];
+    proofs: NetworkInversionProof[];
+    discrepancyReason?: string;
+  } | null>(null);
+
   // Signal de réinitialisation pour vider les champs de saisie (unitaire et groupé)
   const [resetSignal, setResetSignal] = useState(0);
 
@@ -112,30 +180,63 @@ export default function App() {
     rawText: '',
   });
 
-  // Recalcul en cascade de toutes les transactions à chaque changement
+  // Recalcul en cascade de toutes les transactions à chaque changement avec garde-fous
   const transactions: Transaction[] = React.useMemo(() => {
-    return recalculateAllTransactions(rawTransactions, anchor);
+    if (!Array.isArray(rawTransactions) || rawTransactions.length === 0) {
+      return [];
+    }
+    try {
+      return recalculateAllTransactions(rawTransactions, anchor || DEFAULT_ANCHOR) || [];
+    } catch {
+      return [];
+    }
   }, [rawTransactions, anchor]);
 
+  const safeTransactions = Array.isArray(transactions) ? transactions : [];
+  const safeArchived = Array.isArray(archivedTransactions) ? archivedTransactions : [];
+
   // Détection des écarts de solde MVola & Airtel Money
-  const mvolaMismatches = transactions.filter(
-    (t) => t.operator === 'MVOLA' && t.balanceMismatch
+  const mvolaMismatches = safeTransactions.filter(
+    (t) => t && t.operator === 'MVOLA' && t.balanceMismatch
   );
-  const airtelMismatches = transactions.filter(
-    (t) => t.operator === 'AIRTEL' && t.balanceMismatch
+  const airtelMismatches = safeTransactions.filter(
+    (t) => t && t.operator === 'AIRTEL' && t.balanceMismatch
   );
 
   // Analyse de l'équilibre des flux pour badge d'alerte Dash
-  const latestTx = transactions.length > 0 ? transactions[transactions.length - 1] : null;
-  const currentCash = latestTx ? latestTx.cashBalanceAfter : anchor.cash;
-  const currentMvola = latestTx ? latestTx.runningMvolaAfter : anchor.mvola;
-  const currentAirtel = latestTx ? latestTx.runningAirtelAfter : anchor.airtel;
+  const latestTx = safeTransactions.length > 0 ? safeTransactions[safeTransactions.length - 1] : null;
+  const currentCash = latestTx && typeof latestTx.cashBalanceAfter === 'number'
+    ? latestTx.cashBalanceAfter
+    : (Number(anchor?.cash) || 0);
+  const currentMvola = latestTx && typeof latestTx.runningMvolaAfter === 'number'
+    ? latestTx.runningMvolaAfter
+    : (Number(anchor?.mvola) || 0);
+  const currentAirtel = latestTx && typeof latestTx.runningAirtelAfter === 'number'
+    ? latestTx.runningAirtelAfter
+    : (Number(anchor?.airtel) || 0);
   const totalCapital = currentCash + currentMvola + currentAirtel;
 
   const isCashCritical = totalCapital > 0 && currentCash < 0.2 * totalCapital;
   const isMvolaExhausted = currentMvola < 50000;
   const isAirtelExhausted = currentAirtel < 50000;
   const hasFlowAlert = isCashCritical || isMvolaExhausted || isAirtelExhausted;
+
+  // Calcul permanent de la marge journalière et du bénéfice cumulé avec garde-fous stricts
+  const dailyMargin = safeTransactions.length > 0
+    ? safeTransactions.reduce((sum, t) => sum + (Number(t?.commission) || 0), 0)
+    : 0;
+  const archivedMargin = safeArchived.length > 0
+    ? safeArchived.reduce((sum, t) => sum + (Number(t?.commission) || 0), 0)
+    : 0;
+  const cumulativeMargin = archivedMargin + dailyMargin;
+
+  const formattedMargin = `${dailyMargin >= 0 ? '+' : ''}${(Number(dailyMargin) || 0).toLocaleString('fr-FR')} Ar`;
+  const formattedCash = `${(Number(currentCash) || 0).toLocaleString('fr-FR')} Ar`;
+
+  // Toutes les transactions (historique archivé + journée active)
+  const allTransactions = React.useMemo(() => {
+    return [...safeArchived, ...safeTransactions];
+  }, [safeArchived, safeTransactions]);
 
   // -------------------------------------------------------------
   // HANDLERS
@@ -191,15 +292,89 @@ export default function App() {
     return summary;
   };
 
+  // Enregistrement d'une justification d'inversion réseau (Module Anti-Fraude)
+  const handleSaveNetworkProof = (proof: {
+    reference?: string;
+    smsProof1: string;
+    smsProof2: string;
+    dateStr: string;
+  }) => {
+    const newProof: NetworkInversionProof = {
+      id: `proof-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      dateStr: proof.dateStr,
+      timestamp: Date.now(),
+      reference: proof.reference,
+      smsProof1: proof.smsProof1,
+      smsProof2: proof.smsProof2,
+      operator: 'MVOLA',
+    };
+    setNetworkProofs((prev) => [...prev, newProof]);
+    setIsMvolaBannerDismissed(true);
+  };
+
+  // 4. EFFET DE LA VALIDATION DE LA CLÔTURE DE JOURNÉE
+  // - Gèle définitivement toutes les transactions de la journée active (plus aucun SMS sans date ne peut s'y incruster).
+  // - Génère le rapport d'archivage (PDF) en incluant la raison de l'écart si elle existe.
+  // - Bascule automatiquement les valeurs (Soldes Flottes finaux et Cash Réel saisi) pour devenir le nouveau "Point Zéro" (solde d'ouverture) de la journée suivante.
+  const handleCloseDay = ({
+    realCash,
+    finalMvola,
+    finalAirtel,
+    discrepancyReason,
+  }: {
+    realCash: number;
+    finalMvola: number;
+    finalAirtel: number;
+    discrepancyReason?: string;
+  }) => {
+    const currentActiveTxs = [...transactions];
+    const dateStr =
+      currentActiveTxs.length > 0
+        ? currentActiveTxs[currentActiveTxs.length - 1].dateStr
+        : (() => {
+            const now = new Date();
+            const pad = (n: number) => n.toString().padStart(2, '0');
+            return `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
+          })();
+
+    // 1. Gèle définitivement toutes les transactions de la journée active
+    setArchivedTransactions((prev) => [...prev, ...currentActiveTxs]);
+
+    // 2. Bascule automatiquement les valeurs (Soldes Flottes finaux et Cash Réel saisi)
+    // pour devenir le nouveau "Point Zéro" (solde d'ouverture) de la journée suivante
+    const newAnchor: AnchorBalances = {
+      cash: realCash,
+      mvola: finalMvola,
+      airtel: finalAirtel,
+      isLocked: true,
+    };
+    setAnchor(newAnchor);
+
+    // Vider les transactions brutes de la journée active afin de sceller la session
+    setRawTransactions([]);
+    setResetSignal((prev) => prev + 1);
+
+    // 3. Génère le rapport d'archivage (PDF) en incluant la raison de l'écart si elle existe
+    setClosureReceiptModal({
+      isOpen: true,
+      dateStr,
+      transactions: currentActiveTxs,
+      proofs: networkProofs.filter((p) => p.dateStr === dateStr),
+      discrepancyReason,
+    });
+  };
+
   // Suppression d'une transaction unique
   const handleDeleteTransaction = (id: string) => {
     setRawTransactions((prev) => prev.filter((t) => t.id !== id));
+    setArchivedTransactions((prev) => prev.filter((t) => t.id !== id));
   };
 
   // Suppression de toutes les transactions d'une journée (Section 15.A)
   const handleDeleteDay = (dateStr: string) => {
     if (window.confirm(`Supprimer l'intégralité des transactions de la journée du ${dateStr} ?`)) {
       setRawTransactions((prev) => prev.filter((t) => t.dateStr !== dateStr));
+      setArchivedTransactions((prev) => prev.filter((t) => t.dateStr !== dateStr));
     }
   };
 
@@ -223,9 +398,9 @@ export default function App() {
       {/* Top Bar Fixe (Titre wordmark - indicateurs - statut) */}
       <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2 flex items-center justify-between gap-3">
-          {/* Zone 1: Single text wordmark */}
+          {/* À gauche : Logo et nom du CashPoint, avec espèce disponible juste en dessous */}
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 bg-gradient-to-br from-amber-500 to-amber-700 rounded-md text-slate-950 font-black text-xs flex items-center justify-center tracking-wider select-none">
+            <div className="w-7 h-7 bg-gradient-to-br from-amber-500 to-amber-700 rounded-md text-slate-950 font-black text-xs flex items-center justify-center tracking-wider select-none shrink-0">
               CP
             </div>
             <div>
@@ -235,30 +410,18 @@ export default function App() {
                   MVola &amp; Airtel
                 </span>
               </h1>
-              <div className="text-[10px] text-slate-400 font-mono">
-                {activeWindow === 'dash' && '1. Vue Analytique · Bénéfice & Volumes'}
-                {activeWindow === 'guichet' && '2. Guichet Opérationnel · Saisie & Point Zéro'}
-                {activeWindow === 'history' && '3. Grand Registre Comptable Historique'}
-                {activeWindow === 'settings' && '4. Configuration des Grilles & Frais'}
+              {/* Espèce disponible subtile mais visible */}
+              <div className="text-[11px] text-slate-400 font-mono">
+                Cash : {formattedCash}
               </div>
             </div>
           </div>
 
-          {/* Zone 2: Navigation / Indicateurs discrets */}
-          <nav className="hidden md:flex items-center gap-4 text-xs text-slate-400">
-            <span className="flex items-center gap-1 text-slate-300 text-[11px]">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              Anti-Doublons
-            </span>
-            <span aria-hidden="true" className="text-slate-700">·</span>
-            <span className="flex items-center gap-1 text-slate-300 text-[11px]">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              Frais Cachés Détectés
-            </span>
-          </nav>
-
-          {/* Zone 3: Actions rapides */}
-          <div className="flex items-center gap-1.5">
+          {/* À droite : Marge journalière permanente bien visible + actions */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            <div className="text-emerald-400 font-bold font-mono text-xs bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-1 rounded-md shadow-xs">
+              Marge : {formattedMargin}
+            </div>
             <PWAInstallButton />
             {rawTransactions.length > 0 && (
               <button
@@ -281,7 +444,9 @@ export default function App() {
           <DashboardView
             transactions={transactions}
             anchor={anchor}
+            cumulativeMargin={cumulativeMargin}
             onNavigateToGuichet={() => setActiveWindow('guichet')}
+            onCloseDay={handleCloseDay}
           />
         )}
 
@@ -299,23 +464,33 @@ export default function App() {
             }
             onResetSession={handleResetSession}
             onNavigateToHistory={() => setActiveWindow('history')}
+            onNavigateToSettings={() => setActiveWindow('settings')}
             resetSignal={resetSignal}
             isMvolaBannerDismissed={isMvolaBannerDismissed}
             onDismissMvolaBanner={() => setIsMvolaBannerDismissed(true)}
             isAirtelBannerDismissed={isAirtelBannerDismissed}
             onDismissAirtelBanner={() => setIsAirtelBannerDismissed(true)}
+            onSaveNetworkProof={handleSaveNetworkProof}
           />
         )}
 
         {activeWindow === 'history' && (
           <HistoryView
-            transactions={transactions}
+            transactions={allTransactions}
+            networkProofs={networkProofs}
             onDeleteTransaction={handleDeleteTransaction}
             onDeleteDay={handleDeleteDay}
           />
         )}
 
-        {activeWindow === 'settings' && <SettingsView />}
+        {activeWindow === 'settings' && (
+          <SettingsView
+            anchor={anchor}
+            onUpdateAnchor={setAnchor}
+            onResetSession={handleResetSession}
+            transactionCount={transactions.length}
+          />
+        )}
       </main>
 
       {/* BARRE DE NAVIGATION FIXE BAS D'ÉCRAN (BOTTOM NAVIGATION BAR) */}
@@ -333,6 +508,17 @@ export default function App() {
         rawText={unrecognizedModal.rawText}
         onClose={() => setUnrecognizedModal({ isOpen: false, rawText: '' })}
       />
+
+      {/* MODALE DU REÇU D'ARCHIVAGE OFFICIEL (GÉNÉRÉ LORS DE LA CLÔTURE) */}
+      {closureReceiptModal && closureReceiptModal.isOpen && (
+        <OfficialArchiveReceiptModal
+          dateStr={closureReceiptModal.dateStr}
+          transactions={closureReceiptModal.transactions}
+          proofs={closureReceiptModal.proofs}
+          discrepancyReason={closureReceiptModal.discrepancyReason}
+          onClose={() => setClosureReceiptModal(null)}
+        />
+      )}
     </div>
   );
 }

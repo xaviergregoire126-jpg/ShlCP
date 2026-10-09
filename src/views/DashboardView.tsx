@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   TrendingUp,
   Wallet,
@@ -11,76 +11,116 @@ import {
   BarChart3,
   Sparkles,
   PieChart,
+  Lock,
 } from 'lucide-react';
 import { AnchorBalances, Transaction } from '../types';
+import { DayClosureModal } from '../components/DayClosureModal';
 
 interface DashboardViewProps {
   transactions: Transaction[];
   anchor: AnchorBalances;
+  cumulativeMargin?: number;
   onNavigateToGuichet: () => void;
+  onCloseDay?: (closureData: {
+    realCash: number;
+    finalMvola: number;
+    finalAirtel: number;
+    discrepancyReason?: string;
+  }) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
-  transactions,
-  anchor,
+  transactions = [],
+  anchor = { cash: 0, mvola: 0, airtel: 0, isLocked: false },
+  cumulativeMargin = 0,
   onNavigateToGuichet,
+  onCloseDay,
 }) => {
-  // Calculs commissions & marge
-  const mvolaCommissions = transactions
-    .filter((t) => t.operator === 'MVOLA')
-    .reduce((sum, t) => sum + (t.commission || 0), 0);
+  const [isClosureModalOpen, setIsClosureModalOpen] = useState(false);
 
-  const airtelCommissions = transactions
-    .filter((t) => t.operator === 'AIRTEL')
-    .reduce((sum, t) => sum + (t.commission || 0), 0);
+  // Sécurisation stricte des entrées
+  const safeTransactions = Array.isArray(transactions) ? transactions : [];
+  const safeAnchor = anchor || { cash: 0, mvola: 0, airtel: 0, isLocked: false };
+
+  // Calculs commissions & marge avec garde-fous
+  const mvolaCommissions = safeTransactions.length > 0
+    ? safeTransactions
+        .filter((t) => t && t.operator === 'MVOLA')
+        .reduce((sum, t) => sum + (Number(t?.commission) || 0), 0)
+    : 0;
+
+  const airtelCommissions = safeTransactions.length > 0
+    ? safeTransactions
+        .filter((t) => t && t.operator === 'AIRTEL')
+        .reduce((sum, t) => sum + (Number(t?.commission) || 0), 0)
+    : 0;
 
   const totalCommissionsEarned = mvolaCommissions + airtelCommissions;
 
-  const totalHiddenFees = transactions.reduce(
-    (sum, t) => sum + (t.calculatedFee || 0),
-    0
-  );
+  const totalHiddenFees = safeTransactions.length > 0
+    ? safeTransactions.reduce((sum, t) => sum + (Number(t?.calculatedFee) || 0), 0)
+    : 0;
 
-  // INDICATEUR 1 : Marge Nette du Jour = Somme(Toutes_Les_Commissions) sans soustraction des frais
-  const netMarginOfDay = totalCommissionsEarned;
+  // INDICATEUR 1 : Marge Nette du Jour = Somme(Toutes_Les_Commissions)
+  const netMarginOfDay = Number(totalCommissionsEarned) || 0;
+  const displayDailyMargin = netMarginOfDay;
+  const displayCumulativeMargin =
+    typeof cumulativeMargin === 'number' && !isNaN(cumulativeMargin)
+      ? cumulativeMargin
+      : displayDailyMargin;
 
-  const latestTx = transactions.length > 0 ? transactions[transactions.length - 1] : null;
+  const latestTx = safeTransactions.length > 0 ? safeTransactions[safeTransactions.length - 1] : null;
 
   // INDICATEURS 2, 3, 4 : Soldes Hypothétiques (strictement égaux à l'ancrage si 0 transaction)
-  const hypotheticalCash = latestTx ? latestTx.cashBalanceAfter : anchor.cash;
-  const hypotheticalMvola = latestTx ? latestTx.runningMvolaAfter : anchor.mvola;
-  const hypotheticalAirtel = latestTx ? latestTx.runningAirtelAfter : anchor.airtel;
+  const hypotheticalCash = latestTx && typeof latestTx.cashBalanceAfter === 'number'
+    ? latestTx.cashBalanceAfter
+    : (Number(safeAnchor.cash) || 0);
+
+  const hypotheticalMvola = latestTx && typeof latestTx.runningMvolaAfter === 'number'
+    ? latestTx.runningMvolaAfter
+    : (Number(safeAnchor.mvola) || 0);
+
+  const hypotheticalAirtel = latestTx && typeof latestTx.runningAirtelAfter === 'number'
+    ? latestTx.runningAirtelAfter
+    : (Number(safeAnchor.airtel) || 0);
 
   const totalCapital = hypotheticalCash + hypotheticalMvola + hypotheticalAirtel;
-  const anchorTotal = anchor.cash + anchor.mvola + anchor.airtel;
+  const anchorTotal =
+    (Number(safeAnchor.cash) || 0) +
+    (Number(safeAnchor.mvola) || 0) +
+    (Number(safeAnchor.airtel) || 0);
   const cashRatio = totalCapital > 0 ? (hypotheticalCash / totalCapital) * 100 : 0;
 
   // ALERTES DE FLUX DISCRÈTES (Active uniquement si des transactions ont été enregistrées)
-  const hasTransactions = transactions.length > 0;
+  const hasTransactions = safeTransactions.length > 0;
   const isCashCritical = hasTransactions && totalCapital > 0 && hypotheticalCash < 0.2 * totalCapital;
   const isMvolaExhausted = hasTransactions && hypotheticalMvola < 50000;
   const isAirtelExhausted = hasTransactions && hypotheticalAirtel < 50000;
 
   // Volumes
-  const mvolaVolume = transactions
-    .filter((t) => t.operator === 'MVOLA')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const mvolaVolume = safeTransactions.length > 0
+    ? safeTransactions
+        .filter((t) => t && t.operator === 'MVOLA')
+        .reduce((sum, t) => sum + (Number(t?.amount) || 0), 0)
+    : 0;
 
-  const airtelVolume = transactions
-    .filter((t) => t.operator === 'AIRTEL')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const airtelVolume = safeTransactions.length > 0
+    ? safeTransactions
+        .filter((t) => t && t.operator === 'AIRTEL')
+        .reduce((sum, t) => sum + (Number(t?.amount) || 0), 0)
+    : 0;
 
   const totalVolume = mvolaVolume + airtelVolume;
   const mvolaPercent = totalVolume > 0 ? Math.round((mvolaVolume / totalVolume) * 100) : 0;
   const airtelPercent = totalVolume > 0 ? 100 - mvolaPercent : 0;
 
-  const mvolaCount = transactions.filter((t) => t.operator === 'MVOLA').length;
-  const airtelCount = transactions.filter((t) => t.operator === 'AIRTEL').length;
+  const mvolaCount = safeTransactions.filter((t) => t && t.operator === 'MVOLA').length;
+  const airtelCount = safeTransactions.filter((t) => t && t.operator === 'AIRTEL').length;
 
-  const depotCount = transactions.filter((t) => t.typeOperation === 'dépôt').length;
-  const retraitCount = transactions.filter((t) => t.typeOperation === 'retrait').length;
-  const creditCount = transactions.filter((t) => t.typeOperation === 'crédit').length;
-  const transfertCount = transactions.filter((t) => t.typeOperation === 'transfert').length;
+  const depotCount = safeTransactions.filter((t) => t && t.typeOperation === 'dépôt').length;
+  const retraitCount = safeTransactions.filter((t) => t && t.typeOperation === 'retrait').length;
+  const creditCount = safeTransactions.filter((t) => t && t.typeOperation === 'crédit').length;
+  const transfertCount = safeTransactions.filter((t) => t && t.typeOperation === 'transfert').length;
 
   // 2. DONNÉES REVENUS SUR 7 JOURS (Complètement à plat et à 0 au démarrage)
   const sevenDaysData = React.useMemo(() => {
@@ -95,17 +135,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const dayLabel = d.toLocaleDateString('fr-FR', { weekday: 'short' });
       const label = `${dayLabel} ${pad(d.getDate())}`;
 
-      const dayTxs = transactions.filter((t) => t.dateStr === dateStr);
-      const dayComms = dayTxs.reduce((sum, t) => sum + (t.commission || 0), 0);
+      const dayTxs = safeTransactions.filter((t) => t && t.dateStr === dateStr);
+      const dayComms = dayTxs.reduce((sum, t) => sum + (Number(t?.commission) || 0), 0);
       const revenue = dayComms;
 
       days.push({ dateStr, label, revenue });
     }
 
     return days;
-  }, [transactions]);
+  }, [safeTransactions]);
 
-  const max7DayRevenue = Math.max(...sevenDaysData.map((d) => d.revenue), 0);
+  const max7DayRevenue =
+    sevenDaysData.length > 0
+      ? Math.max(...sevenDaysData.map((d) => d.revenue || 0), 0)
+      : 0;
 
   return (
     <div className="space-y-3 animate-in fade-in duration-200">
@@ -186,32 +229,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         )}
       </div>
 
-      {/* LES 4 INDICATEURS CLÉS (COMPACTS & RAFFINÉS) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {/* 1. Marge Nette du Jour */}
-        <div className="py-2.5 px-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-0.5">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1.5 font-bold text-sm text-emerald-400">
-              <Sparkles className="w-3.5 h-3.5" />
-              Marge Nette du Jour
-            </span>
-            <span className="text-[10px] font-mono text-slate-400">
-              +{totalCommissionsEarned.toLocaleString('fr-FR')} Ar com.
-            </span>
+      {/* 1. CARTE MARGE ÉLARGIE (DASH UNIQUEMENT - PLEINE LARGEUR) */}
+      <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-800/80">
+          {/* Bloc Gauche : Marge du Jour */}
+          <div className="space-y-1 sm:pr-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 font-bold text-xs sm:text-sm text-emerald-400">
+                <Sparkles className="w-3.5 h-3.5" />
+                Marge du Jour
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                +{netMarginOfDay.toLocaleString('fr-FR')} Ar com.
+              </span>
+            </div>
+            <div className="text-base font-black text-emerald-400 font-mono tracking-tight tabular-nums">
+              {displayDailyMargin > 0 ? '+' : ''}
+              {displayDailyMargin.toLocaleString('fr-FR')}{' '}
+              <span className="text-xs font-normal text-slate-400">Ar</span>
+            </div>
           </div>
 
-          <div
-            className={`text-xl font-black font-mono tracking-tight tabular-nums ${
-              netMarginOfDay >= 0 ? 'text-emerald-400' : 'text-red-400'
-            }`}
-          >
-            {netMarginOfDay > 0 ? '+' : ''}
-            {netMarginOfDay.toLocaleString('fr-FR')}{' '}
-            <span className="text-xs font-normal text-slate-400">Ar</span>
+          {/* Bloc Droit : Bénéfice Cumulé */}
+          <div className="space-y-1 pt-2.5 sm:pt-0 sm:pl-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 font-bold text-xs sm:text-sm text-emerald-400">
+                <TrendingUp className="w-3.5 h-3.5" />
+                Bénéfice Cumulé
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                Cumul global
+              </span>
+            </div>
+            <div className="text-base font-black text-emerald-400 font-mono tracking-tight tabular-nums">
+              {displayCumulativeMargin > 0 ? '+' : ''}
+              {displayCumulativeMargin.toLocaleString('fr-FR')}{' '}
+              <span className="text-xs font-normal text-slate-400">Ar</span>
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* 2. Cash */}
+      {/* LES 3 SOLDES DE TRÉSORERIE (CASH & FLOTTES) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {/* 1. Cash */}
         <div className="py-2.5 px-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-0.5">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1.5 font-bold text-sm text-slate-200">
@@ -233,7 +294,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* 3. MVola */}
+        {/* 2. MVola */}
         <div className="py-2.5 px-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-0.5">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1.5 font-bold text-sm text-amber-400">
@@ -255,7 +316,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* 4. Airtel Money */}
+        {/* 3. Airtel Money */}
         <div className="py-2.5 px-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-0.5">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1.5 font-bold text-sm text-red-400">
@@ -377,6 +438,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="text-[10px] text-slate-400">Transferts</div>
         </div>
       </div>
+
+      {/* 2. GRAND BOUTON D'ACTION ROUGE DE CLÔTURE DE JOURNÉE */}
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={() => setIsClosureModalOpen(true)}
+          className="w-full py-3 px-4 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-black text-xs sm:text-sm rounded-lg flex items-center justify-center gap-2 shadow-xl shadow-red-950/60 transition-all cursor-pointer border border-red-500 tracking-wider uppercase"
+        >
+          <Lock className="w-4 h-4" />
+          <span>🔒 CLÔTURER LA JOURNÉE</span>
+        </button>
+      </div>
+
+      {/* MODALE POP-UP "Audit de Clôture & Passage de Relais" */}
+      {onCloseDay && (
+        <DayClosureModal
+          isOpen={isClosureModalOpen}
+          onClose={() => setIsClosureModalOpen(false)}
+          mvolaFinalBalance={hypotheticalMvola}
+          airtelFinalBalance={hypotheticalAirtel}
+          theoreticalCash={hypotheticalCash}
+          onConfirmClosure={(data) => {
+            setIsClosureModalOpen(false);
+            onCloseDay({
+              realCash: data.realCash,
+              finalMvola: hypotheticalMvola,
+              finalAirtel: hypotheticalAirtel,
+              discrepancyReason: data.discrepancyReason,
+            });
+          }}
+        />
+      )}
     </div>
   );
 };

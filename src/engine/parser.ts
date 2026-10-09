@@ -567,7 +567,7 @@ export function parseSingleSms(
   if (isMvolaCredit || isMvolaRetrait || isMvolaCredite || isMvolaEchange) {
     // Variable 9 : Référence MVola = le numéro après "Ref:"
     let id = '';
-    const refMatch = text.match(/(?:Ref(?:\s*:)?|Trans\s*ID(?:\s*:)?)\s*([A-Za-z0-9]+)/i);
+    const refMatch = text.match(/(?:Ref(?:\s*[:.]|\s*:?|\s+)|Trans\s*ID(?:\s*[:.]|\s*:?|\s+))\s*([A-Za-z0-9]+)/i);
     if (refMatch) {
       id = refMatch[1];
     } else {

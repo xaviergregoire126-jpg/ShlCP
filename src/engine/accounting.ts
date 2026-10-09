@@ -15,6 +15,17 @@ export function extractNumericReference(ref: string): number {
   return digits ? Number(digits) : 0;
 }
 
+export function extractNumericReferenceBigInt(ref: string): bigint {
+  if (!ref) return 0n;
+  const digits = ref.replace(/\D/g, '');
+  if (!digits) return 0n;
+  try {
+    return BigInt(digits);
+  } catch {
+    return 0n;
+  }
+}
+
 /**
  * 19. ALGORITHME D'INTERCALATION DYNAMIQUE (INDEXATION PAR REF) POUR LES SMS MVOLA SANS HEURE
  * Pour les SMS MVola (notamment l'Achat de crédit YAS) qui ne contiennent aucune date ni heure dans leur texte brut :
@@ -128,27 +139,106 @@ export function recalculateAllTransactions(
   anchor: AnchorBalances,
   arbitratedReferences: string[] = []
 ): Transaction[] {
-  // 1. RECLASSEMENT CHRONOLOGIQUE STRICT
-  // RÈGLE DE TRI RECTIFIÉE : Pour reclasser les SMS MVola du plus ancien au plus récent
-  // dans le traitement de fichier ou de groupe, utilise exclusivement le numéro de "Référence" (Ref: 83xxxx)
-  // qui se suit de manière strictement linéaire. Classe-les par ordre croissant des Références.
-  const sorted = [...rawTransactions].sort((a, b) => {
-    // Si les deux transactions sont MVola, utiliser exclusivement le numéro de Référence croissant
-    if (a.operator === 'MVOLA' && b.operator === 'MVOLA') {
-      const refA = extractNumericReference(a.reference);
-      const refB = extractNumericReference(b.reference);
-      if (refA && refB && refA !== refB) {
-        return refA - refB;
+  // 1. REFACTORING DU MOTEUR DE TRI MVOLA (TRI COMPTABLE LINÉAIRE STRICT PAR RÉFÉRENCE)
+  // - Interdiction absolue d'utiliser l'heure système, l'ordre d'insertion/collage des SMS ou de générer des heures artificielles.
+  // - Extraction & Conversion : Extrais proprement le numéro numérique situé après 'Ref:' et convertis-le en BigInt.
+  // - Tri Comptable Linéaire : Trie l'intégralité du tableau des opérations MVola exclusivement par ordre CROISSANT strict de ces numéros de Référence.
+  const mvolaList = rawTransactions
+    .filter((t) => t.operator === 'MVOLA')
+    .sort((a, b) => {
+      const refA = extractNumericReferenceBigInt(a.reference);
+      const refB = extractNumericReferenceBigInt(b.reference);
+      if (refA !== refB) {
+        return refA < refB ? -1 : 1;
       }
       return a.id.localeCompare(b.id);
+    });
+
+  // Pour les crédits YAS ou SMS sans date explicite, propagation de la date depuis les SMS voisins dans la chaîne des références
+  for (let i = 0; i < mvolaList.length; i++) {
+    const tx = mvolaList[i];
+    if (tx.isDateEstimated || !tx.dateStr) {
+      let foundDate = '';
+      for (let j = i - 1; j >= 0; j--) {
+        if (mvolaList[j].dateStr && !mvolaList[j].isDateEstimated) {
+          foundDate = mvolaList[j].dateStr;
+          break;
+        }
+      }
+      if (!foundDate) {
+        for (let j = i + 1; j < mvolaList.length; j++) {
+          if (mvolaList[j].dateStr && !mvolaList[j].isDateEstimated) {
+            foundDate = mvolaList[j].dateStr;
+            break;
+          }
+        }
+      }
+      if (foundDate) {
+        tx.dateStr = foundDate;
+      }
+    }
+  }
+
+  // 2. INDÉPENDANCE AIRTEL MONEY :
+  // Ne touche pas à la logique d'Airtel Money, qui conserve son propre système de tri basé sur son identifiant alphanumérique unique.
+  const airtelList = rawTransactions
+    .filter((t) => t.operator === 'AIRTEL')
+    .sort((a, b) => {
+      if (a.timestamp !== b.timestamp && a.timestamp !== 0 && b.timestamp !== 0) {
+        return a.timestamp - b.timestamp;
+      }
+      return a.id.localeCompare(b.id);
+    });
+
+  const otherList = rawTransactions
+    .filter((t) => t.operator !== 'MVOLA' && t.operator !== 'AIRTEL')
+    .sort((a, b) => (a.timestamp - b.timestamp) || a.id.localeCompare(b.id));
+
+  // Construction de la suite ordonnée des transactions
+  let sorted: RawParsedSms[] = [];
+  if (airtelList.length === 0 && otherList.length === 0) {
+    sorted = mvolaList;
+  } else if (mvolaList.length === 0) {
+    sorted = [...airtelList, ...otherList];
+  } else {
+    // Si les deux opérateurs sont présents, regrouper par date en préservant l'ordre linéaire MVola
+    const dateMap = new Map<string, { mvola: RawParsedSms[]; airtel: RawParsedSms[]; other: RawParsedSms[] }>();
+    for (const tx of mvolaList) {
+      const d = tx.dateStr || 'Sans Date';
+      if (!dateMap.has(d)) dateMap.set(d, { mvola: [], airtel: [], other: [] });
+      dateMap.get(d)!.mvola.push(tx);
+    }
+    for (const tx of airtelList) {
+      const d = tx.dateStr || 'Sans Date';
+      if (!dateMap.has(d)) dateMap.set(d, { mvola: [], airtel: [], other: [] });
+      dateMap.get(d)!.airtel.push(tx);
+    }
+    for (const tx of otherList) {
+      const d = tx.dateStr || 'Sans Date';
+      if (!dateMap.has(d)) dateMap.set(d, { mvola: [], airtel: [], other: [] });
+      dateMap.get(d)!.other.push(tx);
     }
 
-    // Tri chronologique standard par timestamp
-    if (a.timestamp !== b.timestamp && a.timestamp !== 0 && b.timestamp !== 0) {
-      return a.timestamp - b.timestamp;
+    const sortedDates = Array.from(dateMap.keys()).sort((a, b) => {
+      const parseD = (s: string) => {
+        const parts = s.split(/[\/\-]/);
+        if (parts.length === 3) {
+          const d = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10);
+          let y = parseInt(parts[2], 10);
+          if (y < 100) y += 2000;
+          return new Date(y, m - 1, d).getTime();
+        }
+        return 0;
+      };
+      return parseD(a) - parseD(b);
+    });
+
+    for (const d of sortedDates) {
+      const entry = dateMap.get(d)!;
+      sorted.push(...entry.mvola, ...entry.airtel, ...entry.other);
     }
-    return a.id.localeCompare(b.id);
-  });
+  }
 
   // Application des inversions réseau arbitrées
   if (arbitratedReferences.length > 0) {
